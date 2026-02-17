@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pollster - Vote & Create</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js" type="module"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js" type="module"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js" type="module"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .active-tab { background-color: #2563eb; color: white; }
+        .spinner {
+            border: 3px solid rgba(0, 0, 0, 0.1);
+            width: 36px; height: 36px;
+            border-radius: 50%; border-left-color: #2563eb;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+
+    <div id="app" class="min-h-screen max-w-md mx-auto bg-white shadow-2xl relative flex flex-col pb-20">
+        
+        <header id="main-header" class="p-6 bg-white sticky top-0 z-40 border-b border-gray-50">
+            <div class="flex justify-between items-center mb-6">
+                <h1 class="text-3xl font-black italic tracking-tighter text-blue-600">POLLSTER</h1>
+                <div id="sync-status" class="flex items-center gap-2 bg-gray-100 py-1 px-3 rounded-full">
+                    <span id="status-dot" class="w-2 h-2 bg-yellow-500 rounded-full"></span>
+                    <span id="status-text" class="text-[10px] font-bold text-gray-500 uppercase">Connecting</span>
+                </div>
+            </div>
+            <div id="category-bar" class="flex overflow-x-auto no-scrollbar gap-3 pb-2"></div>
+        </header>
+
+        <main id="main-content" class="flex-1 px-6 py-4">
+            <div id="loading-state" class="flex flex-col items-center justify-center py-20">
+                <div class="spinner"></div>
+                <p class="mt-4 text-gray-400 font-bold text-sm">Connecting to pollstar-21ba0...</p>
+                <p id="error-display" class="mt-4 text-red-500 text-xs text-center hidden px-4"></p>
+            </div>
+        </main>
+
+        <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t border-gray-200 flex justify-around items-center h-16 z-50">
+            <button id="nav-home" class="nav-btn flex flex-col items-center text-blue-600"><i data-lucide="home"></i><span class="text-xs mt-1">Home</span></button>
+            <button id="nav-random" class="nav-btn flex flex-col items-center text-gray-400"><i data-lucide="shuffle"></i><span class="text-xs mt-1">Random</span></button>
+            <button id="nav-profile" class="nav-btn flex flex-col items-center text-gray-400"><i data-lucide="user"></i><span class="text-xs mt-1">Profile</span></button>
+        </nav>
+
+        <button id="fab" class="fixed bottom-20 right-6 w-16 h-16 bg-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center active:scale-90 transition-transform z-40 border-4 border-white hidden">
+            <i data-lucide="plus" class="w-8 h-8"></i>
+        </button>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, updateDoc, deleteDoc, query, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Your Config
+        const firebaseConfig = {
+            apiKey: "AIzaSyDOSsDILOTn-hnrGaMlri_SDEL3R0202ns",
+            authDomain: "pollstar-21ba0.firebaseapp.com",
+            projectId: "pollstar-21ba0",
+            storageBucket: "pollstar-21ba0.firebasestorage.app",
+            messagingSenderId: "1032179871277",
+            appId: "1:1032179871277:web:f8e46e16577d2908f9d2a4"
+        };
+
+        let auth, db;
+        const appId = 'pollstar-21ba0';
+
+        const state = {
+            user: null,
+            userName: localStorage.getItem('pollster_user') || 'User' + Math.floor(Math.random() * 9000),
+            view: 'home',
+            activeCategory: 'All',
+            polls: [],
+            votedPolls: JSON.parse(localStorage.getItem('pollster_voted') || '{}')
+        };
+
+        const CATEGORIES = ["General", "Tech", "Food", "Travel", "Gaming", "Life"];
+
+        const showError = (msg) => {
+            const errEl = document.getElementById('error-display');
+            errEl.innerText = msg;
+            errEl.classList.remove('hidden');
+        };
+
+        const init = async () => {
+            try {
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        state.user = user;
+                        document.getElementById('status-dot').className = "w-2 h-2 rounded-full bg-green-500 animate-pulse";
+                        document.getElementById('status-text').innerText = "Online";
+                        setupRealtimeListeners();
+                        render();
+                    } else {
+                        try {
+                            await signInAnonymously(auth);
+                        } catch (e) {
+                            showError("Auth Failed: Make sure 'Anonymous Auth' is enabled in Firebase Console.");
+                        }
+                    }
+                });
+            } catch (error) {
+                showError("Config Error: Check your Firebase credentials.");
+            }
+        };
+
+        const setupRealtimeListeners = () => {
+            // Using a simpler path for your own project testing
+            const pollsRef = collection(db, 'polls');
+            onSnapshot(pollsRef, (snapshot) => {
+                state.polls = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                render();
+            }, (error) => {
+                console.error(error);
+                showError("Database Error: Check your Firestore Rules.");
+            });
+        };
+
+        function render(params = {}) {
+            const container = document.getElementById('main-content');
+            const fab = document.getElementById('fab');
+            const header = document.getElementById('main-header');
+            
+            if (!state.user) return;
+
+            fab.classList.toggle('hidden', state.view !== 'home');
+            header.style.display = state.view === 'create' ? 'none' : 'block';
+
+            container.innerHTML = '';
+            if (state.view === 'home') renderHome(container);
+            else if (state.view === 'create') renderCreate(container);
+            else if (state.view === 'profile') renderProfile(container);
+            else if (state.view === 'detail') renderDetail(container, params.id);
+
+            renderCategoryBar();
+            lucide.createIcons();
+        }
+
+        function renderCategoryBar() {
+            const bar = document.getElementById('category-bar');
+            if (!bar || state.view !== 'home') { if(bar) bar.innerHTML = ''; return; }
+            bar.innerHTML = ['All', ...CATEGORIES].map(cat => `
+                <button onclick="window.setCat('${cat}')" class="px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap ${state.activeCategory === cat ? 'active-tab' : 'bg-gray-100'}">
+                    ${cat}
+                </button>
+            `).join('');
+        }
+
+        window.setCat = (c) => { state.activeCategory = c; render(); };
+
+        function renderHome(container) {
+            if (state.polls.length === 0) {
+                container.innerHTML = `<div class="text-center py-10 text-gray-400">No polls yet. Click + to start!</div>`;
+                return;
+            }
+            container.innerHTML = state.polls.map(p => `
+                <div onclick="window.router.navigate('detail', {id:'${p.id}'})" class="p-6 rounded-3xl mb-4 bg-blue-600 text-white shadow-lg cursor-pointer">
+                    <h3 class="font-bold text-lg">${p.question}</h3>
+                    <p class="text-[10px] mt-2 opacity-70 uppercase">${p.authorName}</p>
+                </div>
+            `).join('');
+        }
+
+        function renderCreate(container) {
+            container.innerHTML = `
+                <div class="p-6">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-2xl font-black">NEW POLL</h2>
+                        <button onclick="window.router.navigate('home')"><i data-lucide="x"></i></button>
+                    </div>
+                    <textarea id="q-input" class="w-full p-4 bg-gray-100 rounded-2xl mb-4 font-bold" placeholder="Question?"></textarea>
+                    <input class="opt-in w-full p-4 bg-gray-100 rounded-2xl mb-2" placeholder="Option 1">
+                    <input class="opt-in w-full p-4 bg-gray-100 rounded-2xl mb-6" placeholder="Option 2">
+                    <button id="post-btn" class="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold">POST POLL</button>
+                </div>
+            `;
+            document.getElementById('post-btn').onclick = async () => {
+                const q = document.getElementById('q-input').value;
+                const opts = Array.from(document.querySelectorAll('.opt-in')).map(i => i.value).filter(v => v);
+                if(!q || opts.length < 2) return;
+                await addDoc(collection(db, 'polls'), {
+                    question: q,
+                    options: opts.map((t, i) => ({ id: 'o'+i, text: t, votes: 0 })),
+                    authorName: state.userName,
+                    createdAt: Date.now()
+                });
+                state.view = 'home';
+                render();
+            };
+            lucide.createIcons();
+        }
+
+        function renderProfile(container) {
+            container.innerHTML = `
+                <div class="p-6 text-center">
+                    <div class="w-20 h-20 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-2xl font-bold mx-auto mb-4">${state.userName[0]}</div>
+                    <h2 class="text-xl font-bold mb-1">${state.userName}</h2>
+                    <p class="text-xs text-gray-400 mb-8">Anonymous Account</p>
+                    <button onclick="localStorage.clear(); location.reload();" class="text-red-500 font-bold text-sm">Reset Local Data</button>
+                </div>
+            `;
+        }
+
+        function renderDetail(container, id) {
+            const p = state.polls.find(x => x.id === id);
+            if(!p) return;
+            container.innerHTML = `
+                <div class="p-4">
+                    <button onclick="window.router.navigate('home')" class="mb-4"><i data-lucide="arrow-left"></i></button>
+                    <h2 class="text-xl font-bold mb-6">${p.question}</h2>
+                    <div class="space-y-2">
+                        ${p.options.map(o => `<div class="p-4 bg-gray-100 rounded-xl font-bold">${o.text}</div>`).join('')}
+                    </div>
+                </div>
+            `;
+            lucide.createIcons();
+        }
+
+        window.router = { navigate: (v, p) => { state.view = v; render(p); } };
+        document.getElementById('nav-home').onclick = () => window.router.navigate('home');
+        document.getElementById('nav-profile').onclick = () => window.router.navigate('profile');
+        document.getElementById('fab').onclick = () => window.router.navigate('create');
+
+        init();
+    </script>
+</body>
+</html>

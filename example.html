@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pollster - Vote & Create</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js" type="module"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js" type="module"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js" type="module"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+            overflow-x: hidden;
+        }
+
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+            display: flex;
+            overflow-x: auto;
+            scroll-snap-type: x mandatory;
+            -webkit-overflow-scrolling: touch;
+            touch-action: pan-x;
+            padding-bottom: 8px;
+        }
+
+        #category-bar button {
+            scroll-snap-align: center;
+            flex-shrink: 0;
+        }
+
+        .poll-card-gradient {
+            background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.7) 100%);
+        }
+
+        .active-tab {
+            background-color: #2563eb;
+            color: white;
+            transform: scale(1.05);
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        }
+
+        .view-transition {
+            animation: fadeIn 0.2s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(5px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .tag-selector.active-tag {
+            background-color: #2563eb;
+            color: white;
+        }
+
+        .modal-overlay {
+            background-color: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+        }
+
+        .spinner {
+            border: 3px solid rgba(0, 0, 0, 0.1);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border-left-color: #2563eb;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body class="bg-gray-50 text-gray-900">
+
+    <div id="app" class="min-h-screen max-w-md mx-auto bg-white shadow-2xl relative flex flex-col pb-20">
+
+        <header id="main-header" class="p-6 bg-white sticky top-0 z-40 border-b border-gray-50">
+            <div class="flex justify-between items-center mb-6">
+                <h1 class="text-3xl font-black italic tracking-tighter text-blue-600">POLLSTER</h1>
+                <div id="sync-status" class="flex items-center gap-2 bg-gray-100 py-1 px-3 rounded-full">
+                    <span class="w-2 h-2 bg-yellow-500 rounded-full"></span>
+                    <span class="text-[10px] font-bold text-gray-500 uppercase">Connecting</span>
+                </div>
+            </div>
+
+            <div id="category-bar" class="no-scrollbar gap-3"></div>
+        </header>
+
+        <main id="main-content" class="flex-1 px-6 py-4 view-transition">
+            <div class="flex flex-col items-center justify-center py-20">
+                <div class="spinner"></div>
+                <p class="mt-4 text-gray-400 font-bold text-sm">Loading databank...</p>
+            </div>
+        </main>
+
+        <nav
+            class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t border-gray-200 flex justify-around items-center h-16 z-50">
+            <button id="nav-home" class="nav-btn flex flex-col items-center text-blue-600">
+                <i data-lucide="home"></i>
+                <span class="text-xs mt-1">Home</span>
+            </button>
+            <button id="nav-random" class="nav-btn flex flex-col items-center text-gray-400">
+                <i data-lucide="shuffle"></i>
+                <span class="text-xs mt-1">Random</span>
+            </button>
+            <button id="nav-profile" class="nav-btn flex flex-col items-center text-gray-400">
+                <i data-lucide="user"></i>
+                <span class="text-xs mt-1">Profile</span>
+            </button>
+        </nav>
+
+        <button id="fab"
+            class="fixed bottom-20 right-6 w-16 h-16 bg-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center active:scale-90 transition-transform z-40 border-4 border-white hidden">
+            <i data-lucide="plus" class="w-8 h-8"></i>
+        </button>
+
+        <div id="delete-modal" class="fixed inset-0 z-[100] hidden flex items-center justify-center p-6 modal-overlay">
+            <div class="bg-white w-full rounded-3xl p-8 shadow-2xl transform transition-all scale-95 opacity-0"
+                id="modal-box">
+                <div class="bg-red-50 w-16 h-16 rounded-2xl flex items-center justify-center text-red-500 mb-6 mx-auto">
+                    <i data-lucide="trash-2" class="w-8 h-8"></i>
+                </div>
+                <h3 class="text-xl font-black text-center mb-2">Delete Poll?</h3>
+                <p class="text-gray-500 text-center text-sm mb-8 leading-relaxed">This action cannot be undone. All
+                    votes and comments will be lost forever.</p>
+                <div class="flex gap-3">
+                    <button id="close-modal-btn"
+                        class="flex-1 py-4 bg-gray-100 rounded-2xl font-bold text-gray-600 active:scale-95 transition-all">Cancel</button>
+                    <button id="confirm-delete-btn"
+                        class="flex-1 py-4 bg-red-500 rounded-2xl font-bold text-white active:scale-95 transition-all">Delete</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import {initializeApp} from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import {getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged} from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import {getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot, addDoc, updateDoc, deleteDoc, orderBy} from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- Firebase Setup ---
+        const firebaseConfig = {
+          apiKey: "AIzaSyDOSsDILOTn-hnrGaMlri_SDEL3R0202ns",
+          authDomain: "pollstar-21ba0.firebaseapp.com",
+          projectId: "pollstar-21ba0",
+          storageBucket: "pollstar-21ba0.firebasestorage.app",
+          messagingSenderId: "1032179871277",
+          appId: "1:1032179871277:web:f8e46e16577d2908f9d2a4"
+        };
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'pollster-app';
+
+        // --- State ---
+        const state = {
+            user: null,
+            userName: localStorage.getItem('pollster_user') || 'Friend' + Math.floor(Math.random() * 9000),
+            view: 'home',
+            activeCategory: 'All',
+            polls: [],
+            votedPolls: JSON.parse(localStorage.getItem('pollster_voted') || '{}'),
+            pollToDelete: null
+        };
+
+        const CATEGORIES = ["General", "Tech", "Food", "Travel", "Gaming", "Life", "Music", "Sports", "Art"];
+
+        // --- Auth & Data Initialization ---
+        const init = async () => {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Auth error:", error);
+                document.getElementById('sync-status').innerHTML = '<span class="w-2 h-2 bg-red-500 rounded-full"></span><span class="text-[10px] font-bold text-gray-500 uppercase">Offline</span>';
+            }
+        };
+
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                state.user = user;
+                document.getElementById('sync-status').innerHTML = '<span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span><span class="text-[10px] font-bold text-gray-500 uppercase">Cloud Sync</span>';
+
+                // Fetch saved name from databank if it exists
+                const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'userData');
+                const profileSnap = await getDoc(profileRef);
+                if (profileSnap.exists() && profileSnap.data().displayName) {
+                    state.userName = profileSnap.data().displayName;
+                    localStorage.setItem('pollster_user', state.userName);
+                } else {
+                    // Save initial name if no profile exists
+                    await setDoc(profileRef, {displayName: state.userName}, {merge: true});
+                }
+
+                setupRealtimeListeners();
+                render();
+            }
+        });
+
+        const setupRealtimeListeners = () => {
+            const pollsRef = collection(db, 'artifacts', appId, 'public', 'data', 'polls');
+            onSnapshot(pollsRef, (snapshot) => {
+                const polls = [];
+                snapshot.forEach(doc => {
+                    polls.push({id: doc.id, ...doc.data()});
+                });
+                state.polls = polls.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+                render();
+            }, (error) => {
+                console.error("Firestore Error:", error);
+            });
+        };
+
+        // --- UI Logic ---
+        window.router = {
+            navigate: (view, params = {}) => {
+                state.view = view;
+                render(params);
+            }
+        };
+
+        function render(params = {}) {
+            const container = document.getElementById('main-content');
+            const fab = document.getElementById('fab');
+            const header = document.getElementById('main-header');
+
+            if (!state.user) return;
+
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                const viewType = btn.id.replace('nav-', '');
+                const isActive = viewType === state.view;
+                btn.classList.toggle('text-blue-600', isActive);
+                btn.classList.toggle('text-gray-400', !isActive);
+            });
+
+            fab.classList.toggle('hidden', !(state.view === 'home' || state.view === 'profile'));
+            header.style.display = (state.view === 'home' || state.view === 'profile') ? 'block' : 'none';
+
+            container.innerHTML = '';
+            if (state.view === 'home') renderHome(container);
+            else if (state.view === 'profile') renderProfile(container);
+            else if (state.view === 'create') renderCreate(container);
+            else if (state.view === 'detail') renderDetail(container, params.id);
+
+            renderCategoryBar();
+            lucide.createIcons();
+        }
+
+        function renderCategoryBar() {
+            const bar = document.getElementById('category-bar');
+            if (!bar) return;
+
+            if (state.view !== 'home') {
+                bar.innerHTML = '';
+                bar.classList.add('hidden');
+                return;
+            }
+
+            bar.classList.remove('hidden');
+            const cats = ['All', ...CATEGORIES];
+            bar.innerHTML = cats.map(cat => `
+                <button onclick="setCategory('${cat}')" class="px-5 py-2.5 rounded-full text-xs font-bold whitespace-nowrap transition-all ${state.activeCategory === cat ? 'active-tab' : 'bg-gray-100 text-gray-500'}">
+                    ${cat}
+                </button>
+            `).join('');
+        }
+
+        window.setCategory = (cat) => {
+            state.activeCategory = cat;
+            render();
+        };
+
+        function renderHome(container) {
+            const filtered = state.activeCategory === 'All'
+                ? state.polls
+                : state.polls.filter(p => p.tags && p.tags.includes(state.activeCategory));
+
+            if (filtered.length === 0) {
+                container.innerHTML = `
+                    <div class="flex flex-col items-center justify-center py-20 text-center">
+                        <div class="bg-gray-100 p-6 rounded-full mb-4">
+                            <i data-lucide="search-x" class="w-10 h-10 text-gray-400"></i>
+                        </div>
+                        <h3 class="font-bold text-gray-500">No polls here yet</h3>
+                        <p class="text-sm text-gray-400 mt-2">Be the first to share one!</p>
+                    </div>
+                `;
+            } else {
+                container.innerHTML = filtered.map(poll => `
+                    <div onclick="router.navigate('detail', {id: '${poll.id}'})" class="relative w-full h-48 rounded-3xl mb-4 overflow-hidden shadow-lg cursor-pointer transform active:scale-[0.98] transition-all" style="background: ${poll.background && poll.background.startsWith('http') ? `url(${poll.background}) center/cover` : (poll.background || '#3b82f6')}">
+                        <div class="absolute inset-0 poll-card-gradient flex flex-col justify-end p-5">
+                            <div class="flex gap-2 mb-2">
+                                ${(poll.tags || []).map(t => `<span class="px-2 py-0.5 bg-white/20 backdrop-blur-md rounded text-[10px] text-white font-bold uppercase">${t}</span>`).join('')}
+                            </div>
+                            <h3 class="text-white font-bold text-lg leading-tight line-clamp-2">${poll.question}</h3>
+                            <div class="flex justify-between items-center mt-2 text-white/80 text-xs">
+                                <span class="flex items-center gap-1"><i data-lucide="user" class="w-3 h-3"></i> ${poll.authorName}</span>
+                                <span>${(poll.comments || []).length} comments</span>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+
+        function renderDetail(container, id) {
+            const poll = state.polls.find(p => p.id === id);
+            if (!poll) return;
+
+            const totalVotes = poll.options.reduce((a, b) => a + b.votes, 0);
+            const userVote = state.votedPolls[id];
+
+            container.innerHTML = `
+                <div class="fixed inset-0 bg-white z-[60] overflow-y-auto pb-24 max-w-md mx-auto">
+                    <div class="relative h-64 flex items-end p-6" style="background: ${poll.background && poll.background.startsWith('http') ? `url(${poll.background}) center/cover` : (poll.background || '#3b82f6')}">
+                        <button onclick="router.navigate('home')" class="absolute top-4 left-4 p-2 bg-black/40 backdrop-blur-md rounded-full text-white z-20"><i data-lucide="chevron-left"></i></button>
+                        <div class="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent"></div>
+                        <h1 class="relative z-10 text-2xl font-bold text-white leading-tight">${poll.question}</h1>
+                    </div>
+                    <div class="p-6">
+                        <div class="space-y-3 mb-8">
+                            ${poll.options.map(opt => {
+                const pct = totalVotes > 0 ? Math.round((opt.votes / totalVotes) * 100) : 0;
+                const isSelected = userVote === opt.id;
+                return `
+                                    <button onclick="handleVote('${poll.id}', '${opt.id}')" ${userVote ? 'disabled' : ''} class="relative w-full p-4 border-2 rounded-2xl text-left overflow-hidden transition-all ${isSelected ? 'border-blue-500 bg-blue-50' : 'border-gray-100'}">
+                                        ${userVote ? `<div class="absolute left-0 top-0 bottom-0 ${isSelected ? 'bg-blue-200' : 'bg-gray-100'}" style="width: ${pct}%"></div>` : ''}
+                                        <div class="relative flex justify-between items-center z-10 font-bold">
+                                            <span>${opt.text} ${isSelected ? '✓' : ''}</span>
+                                            ${userVote ? `<span>${pct}%</span>` : ''}
+                                        </div>
+                                    </button>
+                                `;
+            }).join('')}
+                        </div>
+                        
+                        <div class="border-t pt-6 mt-10">
+                            <h4 class="font-bold flex items-center gap-2 mb-4"><i data-lucide="message-square" class="w-5 h-5"></i> Comments</h4>
+                            <div class="space-y-4 mb-6">
+                                ${(poll.comments || []).map(c => `
+                                    <div class="bg-gray-50 p-3 rounded-2xl">
+                                        <p class="text-[10px] font-bold text-blue-600 uppercase mb-1">${c.userName}</p>
+                                        <p class="text-sm">${c.text}</p>
+                                    </div>
+                                `).join('')}
+                                ${(!poll.comments || poll.comments.length === 0) ? '<p class="text-gray-400 text-xs text-center py-4">No comments yet.</p>' : ''}
+                            </div>
+                            <div class="flex gap-2">
+                                <input id="comment-input" class="flex-1 bg-gray-100 rounded-full px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="Say something nice...">
+                                <button onclick="addComment('${poll.id}')" class="p-2 bg-blue-600 text-white rounded-full"><i data-lucide="send" class="w-4 h-4"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            lucide.createIcons();
+        }
+
+        function renderProfile(container) {
+            const myPolls = state.polls.filter(p => p.authorId === state.user.uid);
+
+            container.innerHTML = `
+                <div class="bg-gradient-to-br from-blue-600 to-indigo-700 p-8 rounded-3xl text-white mb-8 mt-4 shadow-xl">
+                    <div class="flex items-center gap-5">
+                        <div class="w-20 h-20 bg-white/20 rounded-3xl backdrop-blur-md flex items-center justify-center text-3xl font-black border border-white/30">${state.userName[0]}</div>
+                        <div class="flex-1">
+                            <input id="username-input" class="bg-transparent border-b border-white/30 text-2xl font-bold w-full outline-none focus:border-white transition-all" value="${state.userName}">
+                            <p class="text-blue-100 text-[10px] mt-2 uppercase font-bold tracking-widest opacity-70">Display Name</p>
+                        </div>
+                    </div>
+                </div>
+
+                <h3 class="font-black text-xs uppercase tracking-widest text-gray-400 mb-4 flex justify-between items-center px-2">
+                    Your Posts <span>${myPolls.length} total</span>
+                </h3>
+                <div class="space-y-3">
+                    ${myPolls.map(p => `
+                        <div class="bg-white p-4 rounded-3xl flex items-center gap-4 border border-gray-100 shadow-sm transition-all hover:border-blue-100">
+                            <div class="w-12 h-12 rounded-xl shrink-0 cursor-pointer" onclick="router.navigate('detail', {id: '${p.id}'})" style="background: ${p.background && p.background.startsWith('http') ? `url(${p.background}) center/cover` : (p.background || '#3b82f6')}"></div>
+                            <div class="flex-1 min-w-0 cursor-pointer" onclick="router.navigate('detail', {id: '${p.id}'})">
+                                <h4 class="font-bold text-sm truncate">${p.question}</h4>
+                                <p class="text-[10px] text-gray-400 uppercase font-bold">${p.options.reduce((a, b) => a + b.votes, 0)} votes</p>
+                            </div>
+                            <button onclick="confirmDeletePoll('${p.id}')" class="p-2 text-gray-300 hover:text-red-500 transition-colors">
+                                <i data-lucide="trash-2" class="w-5 h-5"></i>
+                            </button>
+                        </div>
+                    `).join('')}
+                    ${myPolls.length === 0 ? '<p class="text-center py-10 text-gray-400 text-sm">Create your first poll!</p>' : ''}
+                </div>
+            `;
+
+            document.getElementById('username-input').onchange = (e) => updateUsername(e.target.value);
+        }
+
+        function renderCreate(container) {
+            container.innerHTML = `
+                <div class="fixed inset-0 bg-white z-[60] p-6 max-w-md mx-auto overflow-y-auto pb-24">
+                    <div class="flex justify-between items-center mb-8">
+                        <h2 class="text-3xl font-black italic text-blue-600">NEW POLL</h2>
+                        <button onclick="router.navigate('home')" class="p-2 bg-gray-100 rounded-full"><i data-lucide="x"></i></button>
+                    </div>
+                    <div class="space-y-6">
+                        <div>
+                            <label class="block text-xs font-black uppercase tracking-widest text-gray-400 mb-2">The Question</label>
+                            <textarea id="create-q" class="w-full p-4 bg-gray-50 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 text-lg font-bold min-h-[100px]" placeholder="What's on your mind?"></textarea>
+                        </div>
+                        <div id="options-list" class="space-y-3">
+                            <label class="block text-xs font-black uppercase tracking-widest text-gray-400">Choices</label>
+                            <input class="poll-opt w-full p-4 bg-gray-50 rounded-2xl outline-none border-2 border-transparent focus:border-blue-200" placeholder="Choice 1">
+                            <input class="poll-opt w-full p-4 bg-gray-50 rounded-2xl outline-none border-2 border-transparent focus:border-blue-200" placeholder="Choice 2">
+                        </div>
+                        <button onclick="addOptionField()" class="w-full py-3 border-2 border-dashed border-gray-200 rounded-2xl text-gray-400 font-bold text-sm hover:bg-gray-50 active:scale-95 transition-all">+ Add choice</button>
+                        
+                        <div>
+                            <label class="block text-xs font-black uppercase tracking-widest text-gray-400 mb-2">Category</label>
+                            <div class="flex flex-wrap gap-2">
+                                ${CATEGORIES.map(c => `
+                                    <button onclick="this.classList.toggle('active-tag')" class="tag-selector px-4 py-2 bg-gray-100 rounded-full text-xs font-bold transition-all" data-tag="${c}">${c}</button>
+                                `).join('')}
+                            </div>
+                        </div>
+
+                        <button id="launch-poll-btn" class="w-full py-5 bg-blue-600 text-white rounded-3xl font-black text-xl shadow-xl shadow-blue-200 active:scale-95 transition-all mt-4">
+                            LAUNCH POLL
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.getElementById('launch-poll-btn').onclick = submitPoll;
+        }
+
+        window.handleVote = async (pollId, optionId) => {
+            if (state.votedPolls[pollId]) return;
+            const poll = state.polls.find(p => p.id === pollId);
+            if (!poll) return;
+            const updatedOptions = poll.options.map(o => {
+                if (o.id === optionId) return {...o, votes: o.votes + 1};
+                return o;
+            });
+            try {
+                const pollRef = doc(db, 'artifacts', appId, 'public', 'data', 'polls', pollId);
+                await updateDoc(pollRef, {options: updatedOptions});
+                state.votedPolls[pollId] = optionId;
+                localStorage.setItem('pollster_voted', JSON.stringify(state.votedPolls));
+                render({id: pollId});
+            } catch (err) {
+                console.error("Vote failed:", err);
+            }
+        };
+
+        window.addComment = async (pollId) => {
+            const input = document.getElementById('comment-input');
+            const text = input.value.trim();
+            if (!text) return;
+            const poll = state.polls.find(p => p.id === pollId);
+            if (!poll) return;
+            const newComments = [...(poll.comments || []), {
+                userId: state.user.uid,
+                userName: state.userName,
+                text: text,
+                createdAt: Date.now()
+            }];
+            try {
+                const pollRef = doc(db, 'artifacts', appId, 'public', 'data', 'polls', pollId);
+                await updateDoc(pollRef, {comments: newComments});
+                input.value = '';
+                render({id: pollId});
+            } catch (err) {
+                console.error("Comment failed:", err);
+            }
+        };
+
+        const submitPoll = async () => {
+            const q = document.getElementById('create-q').value.trim();
+            const opts = Array.from(document.querySelectorAll('.poll-opt'))
+                .map(i => i.value.trim())
+                .filter(v => v !== '');
+            const selectedTags = Array.from(document.querySelectorAll('.tag-selector.active-tag'))
+                .map(b => b.getAttribute('data-tag'));
+            if (!q || opts.length < 2) return;
+            const pollData = {
+                authorId: state.user.uid,
+                authorName: state.userName,
+                question: q,
+                options: opts.map((text, i) => ({id: `opt-${Date.now()}-${i}`, text, votes: 0})),
+                background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                tags: selectedTags.length > 0 ? selectedTags : ['General'],
+                comments: [],
+                createdAt: Date.now()
+            };
+            try {
+                const pollsRef = collection(db, 'artifacts', appId, 'public', 'data', 'polls');
+                await addDoc(pollsRef, pollData);
+                router.navigate('home');
+            } catch (err) {
+                console.error("Create poll failed:", err);
+            }
+        };
+
+        window.confirmDeletePoll = (id) => {
+            state.pollToDelete = id;
+            const modal = document.getElementById('delete-modal');
+            const box = document.getElementById('modal-box');
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                box.classList.remove('scale-95', 'opacity-0');
+                box.classList.add('scale-100', 'opacity-100');
+            }, 10);
+        };
+
+        document.getElementById('close-modal-btn').onclick = () => {
+            const modal = document.getElementById('delete-modal');
+            const box = document.getElementById('modal-box');
+            box.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                state.pollToDelete = null;
+            }, 200);
+        };
+
+        document.getElementById('confirm-delete-btn').onclick = async () => {
+            if (!state.pollToDelete) return;
+            try {
+                const pollRef = doc(db, 'artifacts', appId, 'public', 'data', 'polls', state.pollToDelete);
+                await deleteDoc(pollRef);
+                document.getElementById('close-modal-btn').click();
+                render();
+            } catch (err) {
+                console.error("Delete failed:", err);
+            }
+        };
+
+        const updateUsername = async (val) => {
+            if (!val.trim()) return;
+            state.userName = val.trim();
+            localStorage.setItem('pollster_user', state.userName);
+
+            if (!state.user) return;
+
+            try {
+                // Save name to profile in databank
+                const profileRef = doc(db, 'artifacts', appId, 'users', state.user.uid, 'profile', 'userData');
+                await setDoc(profileRef, {displayName: state.userName}, {merge: true});
+
+                // Update author name across all polls and comments
+                const updatePromises = state.polls.map(async (p) => {
+                    let changed = false;
+                    const updateData = {};
+
+                    if (p.authorId === state.user.uid && p.authorName !== state.userName) {
+                        updateData.authorName = state.userName;
+                        changed = true;
+                    }
+
+                    if (p.comments) {
+                        const newComments = p.comments.map(c => {
+                            if (c.userId === state.user.uid) return {...c, userName: state.userName};
+                            return c;
+                        });
+
+                        if (JSON.stringify(newComments) !== JSON.stringify(p.comments)) {
+                            updateData.comments = newComments;
+                            changed = true;
+                        }
+                    }
+
+                    if (changed) {
+                        const pollRef = doc(db, 'artifacts', appId, 'public', 'data', 'polls', p.id);
+                        return updateDoc(pollRef, updateData);
+                    }
+                });
+
+                await Promise.all(updatePromises);
+            } catch (err) {
+                console.error("Failed to sync profile:", err);
+            }
+            render();
+        };
+
+        window.addOptionField = () => {
+            const list = document.getElementById('options-list');
+            const input = document.createElement('input');
+            input.className = "poll-opt w-full p-4 bg-gray-50 rounded-2xl outline-none border-2 border-transparent focus:border-blue-200 mb-3";
+            input.placeholder = `Choice ${document.querySelectorAll('.poll-opt').length + 1}`;
+            list.appendChild(input);
+        };
+
+        window.handleRandom = () => {
+            if (state.polls.length === 0) return;
+            const randomIndex = Math.floor(Math.random() * state.polls.length);
+            router.navigate('detail', {id: state.polls[randomIndex].id});
+        };
+
+        document.getElementById('nav-home').onclick = () => router.navigate('home');
+        document.getElementById('nav-random').onclick = () => window.handleRandom();
+        document.getElementById('nav-profile').onclick = () => router.navigate('profile');
+        document.getElementById('fab').onclick = () => router.navigate('create');
+
+        init();
+    </script>
+</body>
+
+</html>
