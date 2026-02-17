@@ -237,6 +237,8 @@
         document.getElementById('nav-profile').onclick = () => window.router.navigate('profile');
         document.getElementById('fab').onclick = () => window.router.navigate('create');
 
+    if ('serviceWorker' in navigator) {window.addEventListener('load', () => {navigator.serviceWorker.register('/service-worker.js').then(reg => console.log('Service Worker registered.')).catch(err => console.error('Service Worker failed.'));});}
+        
         init();
     </script>
 </body>
